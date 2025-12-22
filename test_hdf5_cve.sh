@@ -76,26 +76,36 @@ H5LS=$bindir/h5ls
 H52GIF=$bindir/h52gif
 H5REPACK=$bindir/h5repack
 H5STAT=$bindir/h5stat
+H5CC=$bindir/h5cc
+H5PCC=$bindir/h5pcc
+
+##
+# In case compiler wrappers are not built
+##
+SKIP_H5CC=0
+SKIP_H5PCC=0
 
 ##
 # In case GIF tools are not built
 ##
-SKIP_H52GIF=1
-SKIP_GIF2H5=1
+SKIP_H52GIF=0
+SKIP_GIF2H5=0
 
-# Set flag to skip a gif tool if it is not available
-SET_GIFTOOL() {
+# Set flag to skip a tool if it is not available
+SET_SKIPTOOL() {
     tool=$1
     declare -n arg=$2
     toolpath=$bindir/$tool
     if ! test -f $toolpath; then
-        arg=0
+        arg=1
     fi
 }
 
-# Call SET_GIFTOOL to set the SKIP flag appropriately
-SET_GIFTOOL "gif2h5" SKIP_GIF2H5
-SET_GIFTOOL "h52gif" SKIP_H52GIF
+# Call SET_SKIPTOOL to set the SKIP flag appropriately
+SET_SKIPTOOL "h5cc"   SKIP_H5CC
+SET_SKIPTOOL "h5pcc"  SKIP_H5PCC
+SET_SKIPTOOL "gif2h5" SKIP_GIF2H5
+SET_SKIPTOOL "h52gif" SKIP_H52GIF
 
 # Location of CVE files
 CVE_H5_FILES_DIR=cvefiles
@@ -203,6 +213,42 @@ cve-2024-33874.h5
 cve-2024-33875.h5
 cve-2024-33876.h5
 cve-2024-33877.h5
+cve-2025-2153.h5
+cve-2025-2308.h5
+cve-2025-2309.h5
+cve-2025-2310.h5
+cve-2025-2912.h5
+cve-2025-2913.h5
+cve-2025-2914.h5
+cve-2025-2915.h5
+cve-2025-2923.h5
+cve-2025-2924.h5
+cve-2025-2926.h5
+cve-2025-6269-1.h5
+cve-2025-6269-2.h5
+cve-2025-6269-3.h5
+cve-2025-6269-4.h5
+cve-2025-6270-1.h5
+cve-2025-6270-2.h5
+cve-2025-6270-3.h5
+cve-2025-6516.h5
+cve-2025-6750.h5
+cve-2025-6816.h5
+cve-2025-6817.h5
+cve-2025-6818.h5
+cve-2025-6856.h5
+cve-2025-6857.h5
+cve-2025-6858.h5
+cve-2025-7067.h5
+cve-2025-7068.h5
+cve-2025-7069.h5
+cve-2025-44904.h5
+cve-2025-44905.h5
+OSV-2023-77.h5
+OSV-2024-379.h5
+OSV-2024-390.h5
+OSV-2024-575.h5
+OSV-2024-772.h5
 "
 
 GIF2H5_TEST_FILES="
@@ -417,7 +463,7 @@ TEST_H5STAT() {
 
 # Test h52gif on affected CVE files
 TEST_H52GIF() {
-    if [ $SKIP_H52GIF -eq 0 ]; then
+    if [ $SKIP_H52GIF -eq 1 ]; then
         echo ""
         echo " === h52gif is not available, skip the tests ==="
     else
@@ -430,7 +476,7 @@ TEST_H52GIF() {
 
 # Test gif2h5 on affected CVE files
 TEST_GIF2H5() {
-    if [ $SKIP_GIF2H5 -eq 0 ]; then
+    if [ $SKIP_GIF2H5 -eq 1 ]; then
         echo ""
         echo " === gif2h5 is not available, skip the tests ==="
     else
@@ -493,6 +539,52 @@ TEST_H52GIF
 TEST_GIF2H5
 TEST_H5FORMAT_CONVERT
 TEST_H5CLEAR
+
+##############################################################################
+##############################################################################
+#                                                                            #
+#         Use the mock fuzzing tester program on all CVE files               #
+#                                                                            #
+##############################################################################
+
+if [ $SKIP_H5CC -ne 1 -o $SKIP_H5PCC -ne 1 ]; then
+  # Account for differences between Autotools and CMake builds of parallel HDF5,
+  # where an Autotools build only contain h5pcc rather than both h5cc and h5pcc.
+  if [ $SKIP_H5CC -ne 1 ]; then
+    TEST_COMPILER=$H5CC
+  else
+    TEST_COMPILER=$H5PCC
+  fi
+
+  # Run testing in top-level directory in case $outdir is a
+  # relative path, but copy CVE files to a temporary directory
+  # to avoid modifying the originals
+  mkdir mock_fuzzer_testing
+  cp mock_fuzzer.c mock_fuzzer_testing
+
+  echo ""
+  echo "  === compiling mock fuzzer program with $TEST_COMPILER ==="
+  $TEST_COMPILER mock_fuzzer_testing/mock_fuzzer.c -o mock_fuzzer_testing/mock_fuzzer
+
+  if [ $? -eq 0 ]; then
+    echo "  === mock fuzzer program on all files ==="
+    echo ""
+
+    for testfile in $CVE_TEST_FILES
+    do
+        cp "$CVE_H5_FILES_DIR/$testfile" mock_fuzzer_testing
+        TEST_TOOL "mock_fuzzer_testing/mock_fuzzer" "mock_fuzzer_testing/$testfile"
+        rm "mock_fuzzer_testing/$testfile"
+    done
+
+    rm mock_fuzzer_testing/mock_fuzzer
+  else
+    nerrors=$(( nerrors + 1 ))
+    echo "failed to compile mock fuzzer program"
+  fi
+
+  rm -rf mock_fuzzer_testing
+fi
 
 # Report test results and exit
 echo ""
